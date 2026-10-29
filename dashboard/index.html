@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmartBox Dashboard</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1c2430; --mute:#6b7685; --line:#e1e5ea;
+          --ok:#1e8e4e; --safe:#2563eb; --warn:#d97706; --bad:#dc2626; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:1000px; margin:0 auto; padding:14px; display:grid; gap:12px; }
+  header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h2 { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--mute); margin:0 0 8px; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600; background:#e8ebef; color:var(--mute); }
+  .pill.ok { background:#dff3e7; color:var(--ok); } .pill.bad { background:#fde3e3; color:var(--bad); }
+  .pill.warn { background:#fdf0d9; color:var(--warn); } .pill.safe { background:#dde8fd; color:var(--safe); }
+  #status { font-size:32px; font-weight:800; padding:6px 16px; border-radius:10px; display:inline-block; }
+  .st-SECURE { background:#dff3e7; color:var(--ok); } .st-SAFE { background:#dde8fd; color:var(--safe); }
+  .st-TAMPER_ALERT { background:#fdf0d9; color:var(--warn); }
+  .st-ILLEGAL_OPEN { background:#fde3e3; color:var(--bad); animation:blink 1s infinite; }
+  .st-NONE { background:#e8ebef; color:var(--mute); }
+  @keyframes blink { 50% { opacity:.55; } }
+  .row { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; align-items:center; }
+  button { font:inherit; padding:7px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button:hover { background:#f0f2f5; } button.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:0; }
+  dt { color:var(--mute); } dd { margin:0; font-variant-numeric:tabular-nums; font-weight:600; }
+  canvas { width:100%; height:170px; display:block; }
+  ul#log { list-style:none; margin:0; padding:0; max-height:200px; overflow:auto; font-size:13px; }
+  #log li { padding:4px 0; border-bottom:1px solid var(--line); } #log time { color:var(--mute); margin-right:8px; }
+  details summary { cursor:pointer; color:var(--mute); }
+  label { display:block; font-size:12px; color:var(--mute); margin-top:8px; }
+  input[type=text], input[type=password] { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  .reason { color:var(--mute); margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SmartBox &mdash; Anti-Theft Delivery Box</h1>
+    <div><span id="conn" class="pill">menghubungkan...</span> <span id="det" class="pill">detector ?</span></div>
+  </header>
+
+  <section class="card">
+    <h2>Status keamanan</h2>
+    <div id="status" class="st-NONE">&ndash;</div>
+    <div class="reason" id="reason">Menunggu data dari detector...</div>
+    <div class="row">
+      <span id="armed" class="pill">ARM ?</span>
+      <button class="primary" data-cmd="arm">ARM</button>
+      <button data-cmd="disarm">DISARM</button>
+      <button data-cmd="ack">ACK</button>
+      <button data-cmd="test_alarm">Test alarm HP pemilik</button>
+      <label style="margin:0 0 0 auto"><input type="checkbox" id="beep"> bunyi di dashboard</label>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Edge 1 &middot; Kotak paket</h2>
+      <dl>
+        <dt>Telemetri</dt><dd id="b-online">&ndash;</dd>
+        <dt>Tutup</dt><dd id="b-lid">&ndash;</dd>
+        <dt>Getaran (RMS)</dt><dd id="b-rms">&ndash;</dd>
+        <dt>Cahaya</dt><dd id="b-lux">&ndash;</dd>
+        <dt>Proximity</dt><dd id="b-prox">&ndash;</dd>
+        <dt>Pesan #</dt><dd id="b-seq">&ndash;</dd>
+        <dt>Terakhir</dt><dd id="b-age">&ndash;</dd>
+      </dl>
+    </section>
+    <section class="card">
+      <h2>Edge 2 &middot; HP pemilik</h2>
+      <dl>
+        <dt>Koneksi</dt><dd id="o-online">&ndash;</dd>
+        <dt>Alarm terakhir</dt><dd id="o-alert">belum ada</dd>
+      </dl>
+      <details style="margin-top:14px"><summary>Pengaturan koneksi</summary>
+        <label>PROJECT_ID</label><input type="text" id="cfg-project">
+        <label>MQTT WebSocket URL</label><input type="text" id="cfg-ws">
+        <label>Token kontrol (jika CONTROL_TOKEN diisi)</label><input type="password" id="cfg-token">
+        <div class="row"><button id="cfg-save">Simpan &amp; sambungkan</button></div>
+      </details>
+    </section>
+  </div>
+
+  <section class="card"><h2>Getaran kotak &mdash; motion RMS (m/s&sup2;), 60 pesan terakhir</h2><canvas id="ch-rms"></canvas></section>
+  <section class="card"><h2>Cahaya &amp; status tutup &mdash; lux (area merah = tutup terbuka)</h2><canvas id="ch-lux"></canvas></section>
+  <section class="card"><h2>Log kejadian</h2><ul id="log"></ul></section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+const MAXPTS = 60;
+const $ = id => document.getElementById(id);
+const S = { project:'', ws:'', token:'', client:null, base:'', pts:[], thr:{tamper_rms:0.7, light_open_lux:15},
+            lastStatusAt:0, lastStatus:null, lastBoxAt:0 };
+
+/* ---------- konfigurasi ---------- */
+function loadSaved(){ try { return JSON.parse(localStorage.getItem('smartbox_cfg')||'{}'); } catch(e){ return {}; } }
+async function loadConfig(){
+  let srv = {};
+  try { const r = await fetch('config.json', {cache:'no-store'}); if (r.ok) srv = await r.json(); } catch(e){}
+  const saved = loadSaved();
+  S.project = srv.project_id || saved.project || '';
+  S.ws = srv.ws_url || saved.ws || 'wss://broker.hivemq.com:8884/mqtt';
+  S.token = saved.token || '';
+  $('cfg-project').value = S.project; $('cfg-ws').value = S.ws; $('cfg-token').value = S.token;
+}
+$('cfg-save').onclick = () => {
+  S.project = $('cfg-project').value.trim(); S.ws = $('cfg-ws').value.trim(); S.token = $('cfg-token').value;
+  try { localStorage.setItem('smartbox_cfg', JSON.stringify({project:S.project, ws:S.ws, token:S.token})); } catch(e){}
+  connect();
+};
+
+/* ---------- util ---------- */
+function setPill(el, text, cls){ el.textContent = text; el.className = 'pill ' + (cls||''); }
+function fmt(v, d=2, unit=''){ return (v===null||v===undefined) ? '–' : Number(v).toFixed(d)+unit; }
+function log(msg){
+  const li = document.createElement('li'); const t = document.createElement('time');
+  t.textContent = new Date().toLocaleTimeString(); li.appendChild(t); li.appendChild(document.createTextNode(msg));
+  const ul = $('log'); ul.prepend(li); while (ul.children.length > 60) ul.removeChild(ul.lastChild);
+}
+function beep(){
+  try { const a = new (window.AudioContext||window.webkitAudioContext)(); const o = a.createOscillator(), g = a.createGain();
+    o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(a.destination); o.start();
+    setTimeout(()=>{ o.stop(); a.close(); }, 400); } catch(e){}
+}
+
+/* ---------- MQTT ---------- */
+function connect(){
+  if (S.client) { try { S.client.end(true); } catch(e){} S.client = null; }
+  if (!S.project || !S.ws) { setPill($('conn'), 'isi PROJECT_ID & URL WSS', 'warn'); return; }
+  S.base = 'smartbox/' + S.project + '/';
+  const c = mqtt.connect(S.ws, { clientId:'dash-'+Math.random().toString(16).slice(2,10), clean:true,
+                                 reconnectPeriod:2000, connectTimeout:8000 });
+  S.client = c;
+  c.on('connect', () => {
+    setPill($('conn'), 'broker terhubung', 'ok');
+    c.subscribe([S.base+'status', S.base+'alerts', S.base+'edge/+/telemetry'], {qos:0});
+    log('Terhubung ke broker, project ' + S.project);
+  });
+  c.on('reconnect', () => setPill($('conn'), 'menyambung ulang...', 'warn'));
+  c.on('close', () => setPill($('conn'), 'terputus', 'bad'));
+  c.on('error', e => log('Error MQTT: ' + (e && e.message || e)));
+  c.on('message', (topic, payload) => {
+    let d; try { d = JSON.parse(payload.toString()); } catch(e){ return; }
+    const rel = topic.slice(S.base.length);
+    if (rel === 'status') onStatus(d);
+    else if (rel === 'alerts') onAlert(d);
+    else if (/^edge\/[^/]+\/telemetry$/.test(rel)) onTelemetry(d);
+  });
+}
+function sendCmd(cmd){
+  if (!S.client || !S.client.connected) { log('Belum terhubung ke broker'); return; }
+  S.client.publish(S.base+'control', JSON.stringify({cmd, token:S.token, from:'dashboard'}), {qos:1});
+  log('Perintah dikirim: ' + cmd);
+}
+document.querySelectorAll('button[data-cmd]').forEach(b => b.onclick = () => sendCmd(b.dataset.cmd));
+
+/* ---------- handler pesan ---------- */
+function onStatus(d){
+  S.lastStatusAt = Date.now();
+  if (d.thresholds) S.thr = d.thresholds;
+  const st = $('status'); st.textContent = d.status; st.className = 'st-' + d.status;
+  $('reason').textContent = d.reason || '';
+  setPill($('armed'), d.armed ? 'ARM: aktif' : 'DISARM', d.armed ? 'ok' : 'safe');
+  setPill($('o-online'), d.owner_online ? 'online' : 'offline', d.owner_online ? 'ok' : 'bad');
+  if (d.status !== S.lastStatus) {
+    log('Status: ' + (S.lastStatus || '–') + ' → ' + d.status + ' (' + d.reason + ')');
+    if ((d.status === 'TAMPER_ALERT' || d.status === 'ILLEGAL_OPEN') && $('beep').checked) beep();
+    S.lastStatus = d.status;
+  }
+}
+function onAlert(d){
+  $('o-alert').textContent = new Date().toLocaleTimeString() + ' · ' + d.status;
+}
+function onTelemetry(d){
+  if (d.lid_state === undefined) return;      // hanya telemetry kotak
+  S.lastBoxAt = Date.now();
+  S.pts.push({rms:d.motion_rms, lux:d.lux, open:d.lid_state === 'OPEN'});
+  if (S.pts.length > MAXPTS) S.pts.shift();
+  $('b-rms').textContent = fmt(d.motion_rms, 3, ' m/s²');
+  $('b-lux').textContent = fmt(d.lux, 1, ' lux');
+  $('b-prox').textContent = fmt(d.proximity_cm, 1, ' cm');
+  $('b-seq').textContent = d.sequence;
+  setPill($('b-lid'), d.lid_state === 'OPEN' ? 'TERBUKA' : 'TERTUTUP', d.lid_state === 'OPEN' ? 'bad' : 'ok');
+  if (d.lid_transition) log('Tutup kotak: ' + d.lid_transition);
+  drawAll();
+}
+
+/* ---------- grafik (canvas, tanpa library) ---------- */
+function drawChart(cv, key, thr, thrLabel, color, shadeOpen){
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+  const L = 40, R = 8, T = 8, B = 18, W = w-L-R, H = h-T-B;
+  const vals = S.pts.map(p => p[key]).filter(v => v !== null && v !== undefined);
+  const ymax = Math.max(thr*1.6, ...vals, 0.5);
+  const X = i => L + ((i + MAXPTS - S.pts.length) / (MAXPTS-1)) * W;
+  const Y = v => T + H - (Math.min(v, ymax)/ymax) * H;
+  g.font = '11px system-ui'; g.fillStyle = '#6b7685'; g.strokeStyle = '#e1e5ea'; g.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const v = ymax*k/4, y = Y(v);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(L+W, y); g.stroke(); g.fillText(v.toFixed(ymax>10?0:1), 4, y+4);
+  }
+  if (shadeOpen) {
+    g.fillStyle = 'rgba(220,38,38,.15)'; const bw = W/(MAXPTS-1);
+    S.pts.forEach((p, i) => { if (p.open) g.fillRect(X(i)-bw/2, T, bw, H); });
+  }
+  g.setLineDash([5,4]); g.strokeStyle = '#d97706'; g.beginPath(); g.moveTo(L, Y(thr)); g.lineTo(L+W, Y(thr)); g.stroke();
+  g.setLineDash([]); g.fillStyle = '#d97706'; g.fillText(thrLabel, L+4, Y(thr)-4);
+  g.strokeStyle = color; g.lineWidth = 2; g.beginPath(); let started = false;
+  S.pts.forEach((p, i) => { const v = p[key]; if (v === null || v === undefined) return;
+    started ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)); started = true; });
+  g.stroke();
+}
+function drawAll(){
+  drawChart($('ch-rms'), 'rms', S.thr.tamper_rms, 'ambang ' + S.thr.tamper_rms, '#2563eb', false);
+  drawChart($('ch-lux'), 'lux', S.thr.light_open_lux, 'ambang buka ' + S.thr.light_open_lux + ' lux', '#7c3aed', true);
+}
+window.addEventListener('resize', drawAll);
+
+/* ---------- ticker: umur data & detector online ---------- */
+setInterval(() => {
+  const now = Date.now();
+  const detOk = S.lastStatusAt && now - S.lastStatusAt < 6000;
+  setPill($('det'), detOk ? 'detector aktif' : 'detector mati', detOk ? 'ok' : 'bad');
+  if (S.lastBoxAt) {
+    const age = (now - S.lastBoxAt)/1000;
+    $('b-age').textContent = age.toFixed(0) + ' detik lalu';
+    setPill($('b-online'), age < 15 ? 'online' : 'offline', age < 15 ? 'ok' : 'bad');
+  }
+}, 1000);
+
+loadConfig().then(() => { drawAll(); connect(); });
+</script>
+</body>
+</html>
